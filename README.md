@@ -3,6 +3,10 @@
 **PriceLoreInjector** is a Minecraft Paper/Spigot plugin that dynamically injects price information into item lores without affecting stacking.  
 It supports mined items, mob drops, and chest loot — making it ideal for economy-based servers.
 
+## Dependency
+Uses `ProtocolLib 5.3.0`
+To run on Minecraft version 1.21.4+ `ProtocolLib 5.4.0` is required.
+
 ## Features
 - **Dynamic price injection** into item lore (display price on hover).
 - **No impact on stacking** — items still stack naturally.
