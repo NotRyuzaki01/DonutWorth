@@ -19,20 +19,26 @@ import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
+import net.milkbowl.vault.economy.Economy;
 
 import java.util.*;
 
 public class PriceLoreInjector extends JavaPlugin implements Listener {
 
-    private ProtocolManager protocolManager;
     private static final Map<Material, Double> materialPrices = new HashMap<>();
+    private static Economy economy = null;
 
     @Override
     public void onEnable() {
+        if (!setupEconomy()) {
+            getLogger().severe("❌ Disabled because Vault or an economy plugin (like EssentialsX) was not found!");
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
         saveDefaultConfig();
         loadPrices();
 
-        protocolManager = ProtocolLibrary.getProtocolManager();
+        ProtocolManager protocolManager = ProtocolLibrary.getProtocolManager();
 
         protocolManager.addPacketListener(new PacketAdapter(this, ListenerPriority.NORMAL,
                 PacketType.Play.Server.SET_SLOT, PacketType.Play.Server.WINDOW_ITEMS) {
@@ -63,8 +69,27 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
 
         getServer().getPluginManager().registerEvents(this, this);
         getCommand("worth").setExecutor(new WorthCommand());
+        getCommand("sell").setExecutor(new SellCommand(this));
+        getServer().getPluginManager().registerEvents(new SellCommand(this), this);
+
 
         getLogger().info("✅ PriceLoreInjector enabled with " + materialPrices.size() + " prices loaded!");
+    }
+
+    private boolean setupEconomy() {
+        if (getServer().getPluginManager().getPlugin("Vault") == null) {
+            return false;
+        }
+        var rsp = getServer().getServicesManager().getRegistration(Economy.class);
+        if (rsp == null) {
+            return false;
+        }
+        economy = rsp.getProvider();
+        return true;
+    }
+
+    public static Economy getEconomy() {
+        return economy;
     }
 
     private void loadPrices() {
