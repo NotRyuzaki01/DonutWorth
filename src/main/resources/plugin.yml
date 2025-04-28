@@ -3,3 +3,7 @@ version: '1.0-SNAPSHOT'
 main: me.not_ryuzaki.priceLoreInjector.PriceLoreInjector
 api-version: '1.21'
 depend: [ProtocolLib]
+commands:
+  worth:
+    description: Shows the items worth in the chat & action bar.
+    usage: /worth

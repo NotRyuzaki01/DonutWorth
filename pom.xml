@@ -78,5 +78,11 @@
             <version>5.3.0</version>
             <scope>provided</scope>
         </dependency>
+
+        <dependency>
+            <groupId>net.kyori</groupId>
+            <artifactId>adventure-platform-bukkit</artifactId>
+            <version>4.3.2</version>
+        </dependency>
     </dependencies>
 </project>

@@ -25,7 +25,7 @@ import java.util.*;
 public class PriceLoreInjector extends JavaPlugin implements Listener {
 
     private ProtocolManager protocolManager;
-    private final Map<Material, Double> materialPrices = new HashMap<>();
+    private static final Map<Material, Double> materialPrices = new HashMap<>();
 
     @Override
     public void onEnable() {
@@ -62,6 +62,7 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
         });
 
         getServer().getPluginManager().registerEvents(this, this);
+        getCommand("worth").setExecutor(new WorthCommand());
 
         getLogger().info("✅ PriceLoreInjector enabled with " + materialPrices.size() + " prices loaded!");
     }
@@ -101,7 +102,7 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
         return item;
     }
 
-    private String formatPrice(double price) {
+    public static String formatPrice(double price) {
         if (price >= 1_000_000_000) {
             return String.format("%.2fB", price / 1_000_000_000.0);
         } else if (price >= 1_000_000) {
@@ -131,5 +132,9 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
     public void onItemHeld(PlayerItemHeldEvent event) {
         Player player = event.getPlayer();
         Bukkit.getScheduler().runTaskLater(this, player::updateInventory, 2L);
+    }
+
+    public static Map<Material, Double> getMaterialPrices() {
+        return materialPrices;
     }
 }
