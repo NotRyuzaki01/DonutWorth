@@ -10,6 +10,7 @@ import com.comphenix.protocol.events.PacketEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -21,15 +22,20 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 import net.milkbowl.vault.economy.Economy;
 
+import java.io.File;
 import java.util.*;
 
 public class PriceLoreInjector extends JavaPlugin implements Listener {
 
     private static final Map<Material, Double> materialPrices = new HashMap<>();
     private static Economy economy = null;
+    private static final Set<String> ignoredInventories = new HashSet<>();
 
     @Override
     public void onEnable() {
+        saveResource("IgnoreGUI.yml", false); // Copy it if not already copied
+        loadIgnoredInventories();
+
         if (!setupEconomy()) {
             getLogger().severe("❌ Disabled because Vault or an economy plugin (like EssentialsX) was not found!");
             getServer().getPluginManager().disablePlugin(this);
@@ -42,9 +48,17 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
 
         protocolManager.addPacketListener(new PacketAdapter(this, ListenerPriority.NORMAL,
                 PacketType.Play.Server.SET_SLOT, PacketType.Play.Server.WINDOW_ITEMS) {
+
             @Override
             public void onPacketSending(PacketEvent event) {
                 PacketContainer packet = event.getPacket();
+                Player player = event.getPlayer();
+
+                // Skip if in protected GUI
+                String title = player.getOpenInventory().getTitle();
+                if (isProtectedInventoryTitle(title)) {
+                    return;
+                }
 
                 if (packet.getType() == PacketType.Play.Server.SET_SLOT) {
                     ItemStack item = packet.getItemModifier().read(0);
@@ -76,6 +90,23 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
         getLogger().info("✅ PriceLoreInjector enabled with " + materialPrices.size() + " prices loaded!");
     }
 
+    private void loadIgnoredInventories() {
+        ignoredInventories.clear();
+        try {
+            var config = YamlConfiguration.loadConfiguration(new File(getDataFolder(), "IgnoreGUI.yml"));
+            if (config.isList("ignored")) {
+                for (String title : config.getStringList("ignored")) {
+                    ignoredInventories.add(title);
+                }
+            }
+            getLogger().info("✅ Loaded " + ignoredInventories.size() + " ignored GUIs.");
+        } catch (Exception e) {
+            getLogger().warning("⚠️ Failed to load IgnoreGUI.yml!");
+            e.printStackTrace();
+        }
+    }
+
+
     private boolean setupEconomy() {
         if (getServer().getPluginManager().getPlugin("Vault") == null) {
             return false;
@@ -106,6 +137,10 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
                 }
             }
         }
+    }
+
+    private boolean isProtectedInventoryTitle(String title) {
+        return title != null && ignoredInventories.contains(title);
     }
 
     private ItemStack injectPriceLore(ItemStack item) {
@@ -142,22 +177,31 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
         if (event.getWhoClicked() instanceof Player player) {
+            if (isProtectedInventoryTitle(player.getOpenInventory().getTitle())) return;
+
             Bukkit.getScheduler().runTaskLater(this, player::updateInventory, 2L);
         }
     }
+
 
     @EventHandler
     public void onInventoryDrag(InventoryDragEvent event) {
         if (event.getWhoClicked() instanceof Player player) {
+            if (isProtectedInventoryTitle(player.getOpenInventory().getTitle())) return;
+
             Bukkit.getScheduler().runTaskLater(this, player::updateInventory, 2L);
         }
     }
 
+
     @EventHandler
     public void onItemHeld(PlayerItemHeldEvent event) {
         Player player = event.getPlayer();
+        if (isProtectedInventoryTitle(player.getOpenInventory().getTitle())) return;
+
         Bukkit.getScheduler().runTaskLater(this, player::updateInventory, 2L);
     }
+
 
     public static Map<Material, Double> getMaterialPrices() {
         return materialPrices;
