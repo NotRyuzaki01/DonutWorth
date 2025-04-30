@@ -17,6 +17,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -33,14 +34,13 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
 
     @Override
     public void onEnable() {
-        saveResource("IgnoreGUI.yml", false); // Copy it if not already copied
-        loadIgnoredInventories();
-
         if (!setupEconomy()) {
             getLogger().severe("❌ Disabled because Vault or an economy plugin (like EssentialsX) was not found!");
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
+        saveResource("IgnoreGUI.yml", false); // Copy it if not already copied
+        loadIgnoredInventories();
         saveDefaultConfig();
         loadPrices();
 
@@ -89,6 +89,17 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
 
         getLogger().info("✅ PriceLoreInjector enabled with " + materialPrices.size() + " prices loaded!");
     }
+
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        Player player = event.getPlayer();
+
+        // Just refresh the inventory without actually changing the real items
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            player.updateInventory();
+        }, 10L);
+    }
+
 
     private void loadIgnoredInventories() {
         ignoredInventories.clear();
