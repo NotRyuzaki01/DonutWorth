@@ -3,25 +3,21 @@ package me.not_ryuzaki.priceLoreInjector;
 import com.comphenix.protocol.PacketType;
 import com.comphenix.protocol.ProtocolLibrary;
 import com.comphenix.protocol.ProtocolManager;
-import com.comphenix.protocol.events.ListenerPriority;
-import com.comphenix.protocol.events.PacketAdapter;
-import com.comphenix.protocol.events.PacketContainer;
-import com.comphenix.protocol.events.PacketEvent;
+import com.comphenix.protocol.events.*;
+import net.md_5.bungee.api.ChatColor;
+import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
-import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.inventory.InventoryDragEvent;
-import org.bukkit.event.player.PlayerItemHeldEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.*;
+import org.bukkit.event.inventory.*;
+import org.bukkit.event.player.*;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.*;
 import org.bukkit.plugin.java.JavaPlugin;
-import net.milkbowl.vault.economy.Economy;
 
 import java.io.File;
 import java.util.*;
@@ -29,8 +25,11 @@ import java.util.*;
 public class PriceLoreInjector extends JavaPlugin implements Listener {
 
     private static final Map<Material, Double> materialPrices = new HashMap<>();
+    private static final Map<String, Double> enchantmentPrices = new HashMap<>();
+    private final Set<String> ignoredTitles = new HashSet<>();
+    private final Set<String> ignoredItemNames = new HashSet<>();
     private static Economy economy = null;
-    private static final Set<String> ignoredInventories = new HashSet<>();
+    private static final Set<UUID> playersWithItemsInCursor = new HashSet<>();
 
     @Override
     public void onEnable() {
@@ -39,26 +38,22 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
-        saveResource("IgnoreGUI.yml", false); // Copy it if not already copied
+
+        saveResource("IgnoreGUI.yml", false);
         loadIgnoredInventories();
         saveDefaultConfig();
         loadPrices();
 
         ProtocolManager protocolManager = ProtocolLibrary.getProtocolManager();
-
         protocolManager.addPacketListener(new PacketAdapter(this, ListenerPriority.NORMAL,
                 PacketType.Play.Server.SET_SLOT, PacketType.Play.Server.WINDOW_ITEMS) {
-
             @Override
             public void onPacketSending(PacketEvent event) {
                 PacketContainer packet = event.getPacket();
                 Player player = event.getPlayer();
 
-                // Skip if in protected GUI
-                String title = player.getOpenInventory().getTitle();
-                if (isProtectedInventoryTitle(title)) {
-                    return;
-                }
+                if (shouldSkipInjection(player)) return;
+                if (playersWithItemsInCursor.contains(player.getUniqueId())) return;
 
                 if (packet.getType() == PacketType.Play.Server.SET_SLOT) {
                     ItemStack item = packet.getItemModifier().read(0);
@@ -68,7 +63,6 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
                 } else if (packet.getType() == PacketType.Play.Server.WINDOW_ITEMS) {
                     List<ItemStack> items = packet.getItemListModifier().read(0);
                     List<ItemStack> newItems = new ArrayList<>();
-
                     for (ItemStack item : items) {
                         if (item != null && item.getType() != Material.AIR) {
                             newItems.add(injectPriceLore(item.clone()));
@@ -85,53 +79,18 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
         getCommand("worth").setExecutor(new WorthCommand());
         getCommand("sell").setExecutor(new SellCommand(this));
         getServer().getPluginManager().registerEvents(new SellCommand(this), this);
-
-
-        getLogger().info("✅ PriceLoreInjector enabled with " + materialPrices.size() + " prices loaded!");
     }
 
-    @EventHandler
-    public void onPlayerJoin(PlayerJoinEvent event) {
-        Player player = event.getPlayer();
+    private boolean shouldSkipInjection(Player player) {
+        String title = player.getOpenInventory().getTitle();
 
-        // Just refresh the inventory without actually changing the real items
-        Bukkit.getScheduler().runTaskLater(this, () -> {
-            player.updateInventory();
-        }, 10L);
-    }
-
-
-    private void loadIgnoredInventories() {
-        ignoredInventories.clear();
-        try {
-            var config = YamlConfiguration.loadConfiguration(new File(getDataFolder(), "IgnoreGUI.yml"));
-            if (config.isList("ignored")) {
-                for (String title : config.getStringList("ignored")) {
-                    ignoredInventories.add(title);
-                }
+        for (String keyword : ignoredTitles) {
+            if (title != null && title.toLowerCase().contains(keyword.toLowerCase())) {
+                return true;
             }
-            getLogger().info("✅ Loaded " + ignoredInventories.size() + " ignored GUIs.");
-        } catch (Exception e) {
-            getLogger().warning("⚠️ Failed to load IgnoreGUI.yml!");
-            e.printStackTrace();
         }
-    }
 
-
-    private boolean setupEconomy() {
-        if (getServer().getPluginManager().getPlugin("Vault") == null) {
-            return false;
-        }
-        var rsp = getServer().getServicesManager().getRegistration(Economy.class);
-        if (rsp == null) {
-            return false;
-        }
-        economy = rsp.getProvider();
-        return true;
-    }
-
-    public static Economy getEconomy() {
-        return economy;
+        return false;
     }
 
     private void loadPrices() {
@@ -148,24 +107,106 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
                 }
             }
         }
+
+        enchantmentPrices.clear();
+        ConfigurationSection enchants = getConfig().getConfigurationSection("enchantments");
+        if (enchants != null) {
+            for (String enchantKey : enchants.getKeys(false)) {
+                double price = enchants.getDouble(enchantKey);
+                enchantmentPrices.put(enchantKey.toUpperCase(), price);
+            }
+        }
     }
 
-    private boolean isProtectedInventoryTitle(String title) {
-        return title != null && ignoredInventories.contains(title);
+    private void loadIgnoredInventories() {
+        ignoredTitles.clear();
+        ignoredItemNames.clear();
+        try {
+            File file = new File(getDataFolder(), "IgnoreGUI.yml");
+            YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
+
+            if (config.isList("ignoredTitles")) {
+                ignoredTitles.addAll(config.getStringList("ignoredTitles"));
+            }
+
+            if (config.isList("ignoredItems")) {
+                ignoredItemNames.addAll(config.getStringList("ignoredItems"));
+            }
+        } catch (Exception e) {
+            getLogger().warning("⚠️ Failed to load IgnoreGUI.yml!");
+            e.printStackTrace();
+        }
     }
+
+    private boolean setupEconomy() {
+        if (getServer().getPluginManager().getPlugin("Vault") == null) return false;
+        var rsp = getServer().getServicesManager().getRegistration(Economy.class);
+        if (rsp == null) return false;
+        economy = rsp.getProvider();
+        return true;
+    }
+
+    public static Economy getEconomy() {
+        return economy;
+    }
+
+    public static Map<Material, Double> getMaterialPrices() {
+        return materialPrices;
+    }
+
+    public static Map<String, Double> getEnchantmentPrices() {
+        return enchantmentPrices;
+    }
+
+    private boolean shouldIgnoreItem(ItemStack item) {
+        if (item == null || item.getType() == Material.AIR) return true;
+
+        String typeName = item.getType().name();
+        for (String ignored : ignoredItemNames) {
+            if (typeName.equalsIgnoreCase(ignored)) return true;
+        }
+
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null && meta.hasDisplayName()) {
+            String rawName = ChatColor.stripColor(meta.getDisplayName()).toLowerCase();
+            for (String keyword : ignoredItemNames) {
+                if (rawName.contains(keyword.toLowerCase())) return true;
+            }
+        }
+
+        return false;
+    }
+
+
 
     private ItemStack injectPriceLore(ItemStack item) {
+        if (shouldIgnoreItem(item)) return item;
+
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return item;
 
         List<String> lore = meta.hasLore() ? meta.getLore() : new ArrayList<>();
         lore.removeIf(line -> line.startsWith("§7Worth: §a$"));
 
-        double unitPrice = materialPrices.getOrDefault(item.getType(), 0.0);
-        double totalPrice = unitPrice * item.getAmount();
+        double basePrice = materialPrices.getOrDefault(item.getType(), 0.0);
+        double enchantPrice = 0.0;
 
-        if (totalPrice > 0.0) {
-            lore.add("§7Worth: §a$" + formatPrice(totalPrice));
+        if (meta instanceof EnchantmentStorageMeta storageMeta) {
+            for (var entry : storageMeta.getStoredEnchants().entrySet()) {
+                String key = entry.getKey().getKey().getKey().toUpperCase();
+                enchantPrice += enchantmentPrices.getOrDefault(key, 0.0) * entry.getValue();
+            }
+        } else if (meta.hasEnchants()) {
+            for (var entry : meta.getEnchants().entrySet()) {
+                String key = entry.getKey().getKey().getKey().toUpperCase();
+                enchantPrice += enchantmentPrices.getOrDefault(key, 0.0) * entry.getValue();
+            }
+        }
+
+        double total = (basePrice + enchantPrice) * item.getAmount();
+
+        if (total > 0.0) {
+            lore.add("§7Worth: §a$" + formatPrice(total));
         }
 
         meta.setLore(lore);
@@ -173,48 +214,131 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
         return item;
     }
 
-    public static String formatPrice(double price) {
-        if (price >= 1_000_000_000) {
-            return String.format("%.2fB", price / 1_000_000_000.0);
-        } else if (price >= 1_000_000) {
-            return String.format("%.2fM", price / 1_000_000.0);
-        } else if (price >= 1_000) {
-            return String.format("%.2fK", price / 1_000.0);
-        } else {
-            return String.format("%.2f", price);
+    private ItemStack removePriceLore(ItemStack item) {
+        if (item == null || item.getType() == Material.AIR) return item;
+
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return item;
+
+        if (meta.hasLore()) {
+            List<String> lore = meta.getLore();
+            lore.removeIf(line -> line.startsWith("§7Worth: §a$"));
+            meta.setLore(lore);
+            item.setItemMeta(meta);
         }
+
+        return item;
+    }
+
+    public static String formatPrice(double price) {
+        if (price >= 1_000_000_000) return String.format("%.2fB", price / 1_000_000_000.0);
+        if (price >= 1_000_000) return String.format("%.2fM", price / 1_000_000.0);
+        if (price >= 1_000) return String.format("%.2fK", price / 1_000.0);
+        return String.format("%.2f", price);
     }
 
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
-        if (event.getWhoClicked() instanceof Player player) {
-            if (isProtectedInventoryTitle(player.getOpenInventory().getTitle())) return;
+        if (!(event.getWhoClicked() instanceof Player player)) return;
+        if (shouldSkipInjection(player)) return;
 
-            Bukkit.getScheduler().runTaskLater(this, player::updateInventory, 2L);
+        ItemStack cursor = event.getCursor();
+        ItemStack current = event.getCurrentItem();
+
+        switch (event.getAction()) {
+            case PICKUP_ALL:
+            case PICKUP_HALF:
+            case PICKUP_SOME:
+            case PICKUP_ONE:
+                // Player is picking up items
+                playersWithItemsInCursor.add(player.getUniqueId());
+                if (current != null && current.getType() != Material.AIR) {
+                    event.setCurrentItem(removePriceLore(current));
+                }
+                break;
+
+            case PLACE_ALL:
+            case PLACE_SOME:
+            case PLACE_ONE:
+                // Player is placing items - don't remove from tracking yet
+                if (cursor != null && cursor.getAmount() > 1) {
+                    // Keep tracking if still holding multiple items
+                    playersWithItemsInCursor.add(player.getUniqueId());
+                }
+                break;
+
+            case SWAP_WITH_CURSOR:
+                if (current != null && current.getType() != Material.AIR) {
+                    event.setCurrentItem(removePriceLore(current));
+                }
+                playersWithItemsInCursor.add(player.getUniqueId());
+                break;
+
+            case MOVE_TO_OTHER_INVENTORY:
+                if (cursor != null && cursor.getType() != Material.AIR) {
+                    playersWithItemsInCursor.add(player.getUniqueId());
+                }
+                break;
+
+            case DROP_ALL_CURSOR:
+            case DROP_ONE_CURSOR:
+                if (cursor.getAmount() <= 1) {
+                    playersWithItemsInCursor.remove(player.getUniqueId());
+                }
+                break;
+
+            case CLONE_STACK:
+                playersWithItemsInCursor.add(player.getUniqueId());
+                break;
         }
-    }
 
+        // Update cursor state on next tick
+        Bukkit.getScheduler().runTask(this, () -> {
+            ItemStack newCursor = player.getItemOnCursor();
+            if (newCursor.getType() == Material.AIR || newCursor.getAmount() <= 1) {
+                playersWithItemsInCursor.remove(player.getUniqueId());
+            } else {
+                playersWithItemsInCursor.add(player.getUniqueId());
+            }
+            player.updateInventory();
+        });
+    }
 
     @EventHandler
     public void onInventoryDrag(InventoryDragEvent event) {
-        if (event.getWhoClicked() instanceof Player player) {
-            if (isProtectedInventoryTitle(player.getOpenInventory().getTitle())) return;
+        if (!(event.getWhoClicked() instanceof Player player)) return;
+        if (shouldSkipInjection(player)) return;
 
-            Bukkit.getScheduler().runTaskLater(this, player::updateInventory, 2L);
+        if (event.getOldCursor().getType() != Material.AIR) {
+            playersWithItemsInCursor.add(player.getUniqueId());
         }
+
+        Bukkit.getScheduler().runTask(this, () -> {
+            ItemStack newCursor = player.getItemOnCursor();
+            if (newCursor.getType() == Material.AIR || newCursor.getAmount() <= 1) {
+                playersWithItemsInCursor.remove(player.getUniqueId());
+            } else {
+                playersWithItemsInCursor.add(player.getUniqueId());
+            }
+            player.updateInventory();
+        });
     }
 
 
     @EventHandler
-    public void onItemHeld(PlayerItemHeldEvent event) {
+    public void onPlayerDropItem(PlayerDropItemEvent event) {
         Player player = event.getPlayer();
-        if (isProtectedInventoryTitle(player.getOpenInventory().getTitle())) return;
-
-        Bukkit.getScheduler().runTaskLater(this, player::updateInventory, 2L);
+        playersWithItemsInCursor.remove(player.getUniqueId());
+        Bukkit.getScheduler().runTaskLater(this, player::updateInventory, 1L);
     }
 
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        playersWithItemsInCursor.remove(event.getPlayer().getUniqueId());
+    }
 
-    public static Map<Material, Double> getMaterialPrices() {
-        return materialPrices;
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        Bukkit.getScheduler().runTaskLater(this, () -> event.getPlayer().updateInventory(), 10L);
     }
 }
