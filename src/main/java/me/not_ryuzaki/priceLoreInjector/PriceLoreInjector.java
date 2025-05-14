@@ -250,7 +250,6 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
             case PICKUP_HALF:
             case PICKUP_SOME:
             case PICKUP_ONE:
-                // Player is picking up items
                 playersWithItemsInCursor.add(player.getUniqueId());
                 if (current != null && current.getType() != Material.AIR) {
                     event.setCurrentItem(removePriceLore(current));
@@ -260,11 +259,7 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
             case PLACE_ALL:
             case PLACE_SOME:
             case PLACE_ONE:
-                // Player is placing items - don't remove from tracking yet
-                if (cursor != null && cursor.getAmount() > 1) {
-                    // Keep tracking if still holding multiple items
-                    playersWithItemsInCursor.add(player.getUniqueId());
-                }
+                playersWithItemsInCursor.add(player.getUniqueId());
                 break;
 
             case SWAP_WITH_CURSOR:
@@ -275,27 +270,30 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
                 break;
 
             case MOVE_TO_OTHER_INVENTORY:
-                if (cursor != null && cursor.getType() != Material.AIR) {
+                if (cursor.getType() != Material.AIR) {
                     playersWithItemsInCursor.add(player.getUniqueId());
                 }
                 break;
 
             case DROP_ALL_CURSOR:
             case DROP_ONE_CURSOR:
-                if (cursor.getAmount() <= 1) {
+                if (player.getItemOnCursor().getType() == Material.AIR) {
                     playersWithItemsInCursor.remove(player.getUniqueId());
                 }
                 break;
 
-            case CLONE_STACK:
+            case HOTBAR_SWAP:
+                // Handle number key swaps
                 playersWithItemsInCursor.add(player.getUniqueId());
                 break;
+
+            // No longer using deprecated HOTBAR_MOVE_AND_READD
         }
 
         // Update cursor state on next tick
         Bukkit.getScheduler().runTask(this, () -> {
             ItemStack newCursor = player.getItemOnCursor();
-            if (newCursor.getType() == Material.AIR || newCursor.getAmount() <= 1) {
+            if (newCursor.getType() == Material.AIR) {
                 playersWithItemsInCursor.remove(player.getUniqueId());
             } else {
                 playersWithItemsInCursor.add(player.getUniqueId());
@@ -303,27 +301,21 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
             player.updateInventory();
         });
     }
-
     @EventHandler
     public void onInventoryDrag(InventoryDragEvent event) {
         if (!(event.getWhoClicked() instanceof Player player)) return;
         if (shouldSkipInjection(player)) return;
 
-        if (event.getOldCursor().getType() != Material.AIR) {
-            playersWithItemsInCursor.add(player.getUniqueId());
-        }
+        playersWithItemsInCursor.add(player.getUniqueId());
 
         Bukkit.getScheduler().runTask(this, () -> {
             ItemStack newCursor = player.getItemOnCursor();
-            if (newCursor.getType() == Material.AIR || newCursor.getAmount() <= 1) {
+            if (newCursor.getType() == Material.AIR) {
                 playersWithItemsInCursor.remove(player.getUniqueId());
-            } else {
-                playersWithItemsInCursor.add(player.getUniqueId());
             }
             player.updateInventory();
         });
     }
-
 
     @EventHandler
     public void onPlayerDropItem(PlayerDropItemEvent event) {
