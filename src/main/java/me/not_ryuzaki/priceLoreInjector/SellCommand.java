@@ -73,7 +73,7 @@ public class SellCommand implements CommandExecutor, Listener {
 
         if (total > 0.0) {
             PriceLoreInjector.getEconomy().depositPlayer(player, total);
-            player.sendMessage("§aYou sold your items for §6$" + PriceLoreInjector.formatPrice(total) + "§a!");
+            player.sendMessage("§a+$" + PriceLoreInjector.formatPrice(total));
             player.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent("§a+$" + PriceLoreInjector.formatPrice(total)));
             player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.2f);
         } else {

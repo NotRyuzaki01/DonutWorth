@@ -52,20 +52,41 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
                 PacketContainer packet = event.getPacket();
                 Player player = event.getPlayer();
 
-                if (shouldSkipInjection(player)) return;
                 if (playersWithItemsInCursor.contains(player.getUniqueId())) return;
 
+                int windowId = packet.getIntegers().readSafely(0); // Window ID
+                boolean isPlayerInventory = windowId == 0; // Player inventory is windowId 0
+
                 if (packet.getType() == PacketType.Play.Server.SET_SLOT) {
+                    int slot = packet.getIntegers().readSafely(1);
                     ItemStack item = packet.getItemModifier().read(0);
+
+                    boolean skipTopInjection = !isPlayerInventory && shouldSkipInjection(player);
+                    boolean isInTopInventory = slot < player.getOpenInventory().getTopInventory().getSize();
+
                     if (item != null && item.getType() != Material.AIR) {
+                        if (skipTopInjection && isInTopInventory) {
+                            // Skip adding lore to top GUI
+                            return;
+                        }
                         packet.getItemModifier().write(0, injectPriceLore(item.clone()));
                     }
+
                 } else if (packet.getType() == PacketType.Play.Server.WINDOW_ITEMS) {
                     List<ItemStack> items = packet.getItemListModifier().read(0);
+                    int topSize = player.getOpenInventory().getTopInventory().getSize();
+                    boolean skipTopInjection = shouldSkipInjection(player);
+
                     List<ItemStack> newItems = new ArrayList<>();
-                    for (ItemStack item : items) {
+                    for (int i = 0; i < items.size(); i++) {
+                        ItemStack item = items.get(i);
                         if (item != null && item.getType() != Material.AIR) {
-                            newItems.add(injectPriceLore(item.clone()));
+                            boolean isTop = i < topSize;
+                            if (skipTopInjection && isTop) {
+                                newItems.add(item); // Leave top half untouched
+                            } else {
+                                newItems.add(injectPriceLore(item.clone())); // Inject into bottom half
+                            }
                         } else {
                             newItems.add(item);
                         }
@@ -73,6 +94,7 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
                     packet.getItemListModifier().write(0, newItems);
                 }
             }
+
         });
 
         getServer().getPluginManager().registerEvents(this, this);
@@ -231,11 +253,19 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
     }
 
     public static String formatPrice(double price) {
-        if (price >= 1_000_000_000) return String.format("%.2fB", price / 1_000_000_000.0);
-        if (price >= 1_000_000) return String.format("%.2fM", price / 1_000_000.0);
-        if (price >= 1_000) return String.format("%.2fK", price / 1_000.0);
-        return String.format("%.2f", price);
+        if (price >= 1_000_000_000) return trimTrailingZeros(price / 1_000_000_000.0) + "B";
+        if (price >= 1_000_000) return trimTrailingZeros(price / 1_000_000.0) + "M";
+        if (price >= 1_000) return trimTrailingZeros(price / 1_000.0) + "K";
+        return trimTrailingZeros(price);
     }
+
+    private static String trimTrailingZeros(double value) {
+        if (value == (long) value)
+            return String.format("%d", (long) value);
+        else
+            return String.format("%.2f", value).replaceAll("0+$", "").replaceAll("\\.$", "");
+    }
+
 
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
@@ -286,8 +316,6 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
                 // Handle number key swaps
                 playersWithItemsInCursor.add(player.getUniqueId());
                 break;
-
-            // No longer using deprecated HOTBAR_MOVE_AND_READD
         }
 
         // Update cursor state on next tick
