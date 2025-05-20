@@ -126,13 +126,13 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return item;
 
-        if (meta.hasLore() && !meta.getLore().isEmpty()) return item;
+        boolean hasCustomName = meta.hasDisplayName();
+        boolean hasLore = meta.hasLore() && meta.getLore() != null && !meta.getLore().isEmpty();
+        boolean containsWorth = hasLore && meta.getLore().stream()
+                .anyMatch(line -> ChatColor.stripColor(line).toLowerCase().contains("worth:"));
 
-        if (meta.hasDisplayName()) {
-            String displayName = ChatColor.stripColor(meta.getDisplayName()).toLowerCase();
-            String defaultName = item.getType().name().toLowerCase().replace('_', ' ');
-            if (!displayName.contains(defaultName)) return item;
-        }
+        // Skip if item has a custom name and doesn't contain "Worth:" in the lore
+        if (hasCustomName && !containsWorth) return item;
 
         double basePrice = materialPrices.getOrDefault(item.getType(), 0.0);
         double enchantPrice = 0.0;
@@ -158,6 +158,8 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
         item.setItemMeta(meta);
         return item;
     }
+
+
 
     public static String formatPrice(double price) {
         if (price >= 1_000_000_000) return trimTrailingZeros(price / 1_000_000_000.0) + "B";
