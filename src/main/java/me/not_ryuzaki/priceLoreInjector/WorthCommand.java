@@ -1,5 +1,6 @@
 package me.not_ryuzaki.priceLoreInjector;
 
+import net.md_5.bungee.api.ChatColor;
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.Material;
@@ -25,12 +26,12 @@ public class WorthCommand implements CommandExecutor {
             return true;
         }
 
-        String input = args[0].toUpperCase().replace(" ", "_");
+        String input = String.join(" ", args).toUpperCase().replace(" ", "_");
         Material material;
         try {
             material = Material.valueOf(input);
         } catch (IllegalArgumentException e) {
-            player.sendMessage("§cUnknown item: " + args[0]);
+            player.sendMessage("§cUnknown item: " + String.join(" ", args));
             return true;
         }
 
@@ -74,12 +75,28 @@ public class WorthCommand implements CommandExecutor {
         String finalName = displayName.toString();
 
         if (total > 0.0) {
-            player.sendMessage("§7One " + finalName + " §7is Worth: §a$" + formatPrice(total));
-            player.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent(finalName + " §7is Worth: §a$" + formatPrice(total)));
+            player.sendMessage("§x§0§0§9§4§f§f1 " + finalName + " §fis worth §a$" + formatPrice(total));
+            TextComponent nameComponent = new TextComponent("1 " + finalName);
+            nameComponent.setColor(ChatColor.of("#0094ff")); // Light blue
+
+            TextComponent valueComponent = new TextComponent(" is worth ");
+            valueComponent.setColor(ChatColor.WHITE);
+
+            TextComponent priceComponent = new TextComponent("$" + formatPrice(total));
+            priceComponent.setColor(ChatColor.GREEN);
+
+            // Combine components
+            TextComponent actionBar = new TextComponent();
+            actionBar.addExtra(nameComponent);
+            actionBar.addExtra(valueComponent);
+            actionBar.addExtra(priceComponent);
+
+            // Send to player
+            player.spigot().sendMessage(ChatMessageType.ACTION_BAR, actionBar);
         } else {
             player.sendMessage("§cThat item has no value.");
+            player.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent(ChatColor.RED + "That item has no value."));
         }
-
         return true;
     }
 }
