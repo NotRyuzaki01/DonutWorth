@@ -9,6 +9,8 @@ import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.event.*;
@@ -18,6 +20,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.*;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.io.File;
 import java.util.*;
 
 public class PriceLoreInjector extends JavaPlugin implements Listener {
@@ -26,6 +29,8 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
     private static final Map<String, Double> enchantmentPrices = new HashMap<>();
     private static Economy economy = null;
     private static final Set<UUID> playersWithItemsInCursor = new HashSet<>();
+    private FileConfiguration ignoreGuiConfig;
+    private Set<String> ignoredTitles = new HashSet<>();
 
     @Override
     public void onEnable() {
@@ -36,7 +41,9 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
         }
 
         saveDefaultConfig();
+        saveResource("ignoreGUI.yml", false);
         loadPrices();
+        loadIgnoreTitles();
 
         ProtocolManager protocolManager = ProtocolLibrary.getProtocolManager();
         protocolManager.addPacketListener(new PacketAdapter(this, ListenerPriority.NORMAL,
@@ -48,18 +55,44 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
 
                 if (playersWithItemsInCursor.contains(player.getUniqueId())) return;
 
+                String title = player.getOpenInventory().getTitle();
+                int topSize = player.getOpenInventory().getTopInventory().getSize();
+                boolean skipTopInventory = false;
+
+                for (String ignored : ignoredTitles) {
+                    if (title.toLowerCase().contains(ignored.toLowerCase())) {
+                        skipTopInventory = true;
+                        break;
+                    }
+                }
+
                 if (packet.getType() == PacketType.Play.Server.SET_SLOT) {
+                    int slot = packet.getIntegers().read(1);
                     ItemStack item = packet.getItemModifier().read(0);
                     if (item != null && item.getType() != Material.AIR) {
-                        packet.getItemModifier().write(0, injectPriceLore(item.clone()));
+                        boolean isPlayerInventorySlot = slot >= topSize;
+                        if (!skipTopInventory) {
+                            packet.getItemModifier().write(0, injectPriceLore(item.clone()));
+                        } else if (isPlayerInventorySlot) {
+                            packet.getItemModifier().write(0, injectPriceLore(item.clone()));
+                        }
                     }
+                }
 
-                } else if (packet.getType() == PacketType.Play.Server.WINDOW_ITEMS) {
+                if (packet.getType() == PacketType.Play.Server.WINDOW_ITEMS) {
                     List<ItemStack> items = packet.getItemListModifier().read(0);
                     List<ItemStack> newItems = new ArrayList<>();
-                    for (ItemStack item : items) {
+                    for (int i = 0; i < items.size(); i++) {
+                        ItemStack item = items.get(i);
+                        boolean isPlayerInventorySlot = i >= topSize;
                         if (item != null && item.getType() != Material.AIR) {
-                            newItems.add(injectPriceLore(item.clone()));
+                            if (!skipTopInventory) {
+                                newItems.add(injectPriceLore(item.clone()));
+                            } else if (isPlayerInventorySlot) {
+                                newItems.add(injectPriceLore(item.clone()));
+                            } else {
+                                newItems.add(item);
+                            }
                         } else {
                             newItems.add(item);
                         }
@@ -73,6 +106,13 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
         getCommand("worth").setExecutor(new WorthCommand());
         getCommand("sell").setExecutor(new SellCommand(this));
         getServer().getPluginManager().registerEvents(new SellCommand(this), this);
+    }
+
+    private void loadIgnoreTitles() {
+        File ignoreFile = new File(getDataFolder(), "ignoreGUI.yml");
+        ignoreGuiConfig = YamlConfiguration.loadConfiguration(ignoreFile);
+        ignoredTitles = new HashSet<>(ignoreGuiConfig.getStringList("ignored-titles"));
+        getLogger().info("Loaded ignored GUI titles: " + ignoredTitles);
     }
 
     private void loadPrices() {
@@ -127,12 +167,17 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
         if (meta == null) return item;
 
         boolean hasCustomName = meta.hasDisplayName();
-        boolean hasLore = meta.hasLore() && meta.getLore() != null && !meta.getLore().isEmpty();
-        boolean containsWorth = hasLore && meta.getLore().stream()
-                .anyMatch(line -> ChatColor.stripColor(line).toLowerCase().contains("worth:"));
+        List<String> lore = meta.hasLore() ? meta.getLore() : new ArrayList<>();
+        if (lore == null) lore = new ArrayList<>();
 
-        // Skip if item has a custom name and doesn't contain "Worth:" in the lore
-        if (hasCustomName && !containsWorth) return item;
+        // Check if this is a button (custom name AND either no lore or lore without "Worth")
+        boolean isButton = hasCustomName &&
+                (lore.isEmpty() ||
+                        lore.stream().noneMatch(line -> ChatColor.stripColor(line).toLowerCase().contains("worth:")));
+
+        if (isButton) {
+            return item; // Don't inject price for buttons
+        }
 
         double basePrice = materialPrices.getOrDefault(item.getType(), 0.0);
         double enchantPrice = 0.0;
@@ -152,14 +197,15 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
         double total = (basePrice + enchantPrice) * item.getAmount();
         if (total <= 0.0) return item;
 
-        List<String> lore = new ArrayList<>();
+        // Remove existing price lore if present
+        lore.removeIf(line -> ChatColor.stripColor(line).toLowerCase().contains("worth:"));
+
+        // Add new price lore
         lore.add("§7Worth: §a$" + formatPrice(total));
         meta.setLore(lore);
         item.setItemMeta(meta);
         return item;
     }
-
-
 
     public static String formatPrice(double price) {
         if (price >= 1_000_000_000) return trimTrailingZeros(price / 1_000_000_000.0) + "B";
@@ -179,32 +225,16 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
     public void onInventoryClick(InventoryClickEvent event) {
         if (!(event.getWhoClicked() instanceof Player player)) return;
 
-        ItemStack cursor = event.getCursor();
-        ItemStack current = event.getCurrentItem();
-
         switch (event.getAction()) {
-            case PICKUP_ALL:
-            case PICKUP_HALF:
-            case PICKUP_SOME:
-            case PICKUP_ONE:
-                playersWithItemsInCursor.add(player.getUniqueId());
-                break;
+            case PICKUP_ALL, PICKUP_HALF, PICKUP_SOME, PICKUP_ONE,
+                 PLACE_ALL, PLACE_SOME, PLACE_ONE,
+                 SWAP_WITH_CURSOR, MOVE_TO_OTHER_INVENTORY, HOTBAR_SWAP -> playersWithItemsInCursor.add(player.getUniqueId());
 
-            case PLACE_ALL:
-            case PLACE_SOME:
-            case PLACE_ONE:
-            case SWAP_WITH_CURSOR:
-            case MOVE_TO_OTHER_INVENTORY:
-            case HOTBAR_SWAP:
-                playersWithItemsInCursor.add(player.getUniqueId());
-                break;
-
-            case DROP_ALL_CURSOR:
-            case DROP_ONE_CURSOR:
+            case DROP_ALL_CURSOR, DROP_ONE_CURSOR -> {
                 if (player.getItemOnCursor().getType() == Material.AIR) {
                     playersWithItemsInCursor.remove(player.getUniqueId());
                 }
-                break;
+            }
         }
 
         Bukkit.getScheduler().runTask(this, () -> {
