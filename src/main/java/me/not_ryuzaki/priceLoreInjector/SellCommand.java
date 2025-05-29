@@ -5,12 +5,14 @@ import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.Sound;
+import org.bukkit.block.BlockState;
 import org.bukkit.command.*;
 import org.bukkit.entity.Player;
 import org.bukkit.event.*;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.inventory.*;
 import org.bukkit.inventory.meta.*;
+import org.bukkit.block.ShulkerBox;
 
 import java.util.*;
 
@@ -63,8 +65,43 @@ public class SellCommand implements CommandExecutor, Listener {
                     }
                 }
 
-                if (basePrice > 0.0 || enchantPrice > 0.0) {
-                    total += (basePrice + enchantPrice) * item.getAmount();
+                double itemTotal = (basePrice + enchantPrice) * item.getAmount();
+
+                // 🟨 If it's a shulker, check inside and add their worth
+                if (item.getType().name().endsWith("SHULKER_BOX") && meta instanceof BlockStateMeta blockMeta) {
+                    BlockState state = blockMeta.getBlockState();
+                    if (state instanceof ShulkerBox shulker) {
+                        double[] shulkerValue = {0.0};
+
+                        shulker.getInventory().forEach(content -> {
+                            if (content == null || content.getType() == Material.AIR) return;
+
+                            double contentBase = PriceLoreInjector.getMaterialPrices().getOrDefault(content.getType(), 0.0);
+                            double contentEnchant = 0.0;
+
+                            ItemMeta contentMeta = content.getItemMeta();
+                            if (contentMeta instanceof EnchantmentStorageMeta contentStorage) {
+                                for (var entry : contentStorage.getStoredEnchants().entrySet()) {
+                                    String key = entry.getKey().getKey().getKey().toUpperCase();
+                                    contentEnchant += PriceLoreInjector.getEnchantmentPrices().getOrDefault(key, 0.0) * entry.getValue();
+                                }
+                            } else if (contentMeta != null && contentMeta.hasEnchants()) {
+                                for (var entry : contentMeta.getEnchants().entrySet()) {
+                                    String key = entry.getKey().getKey().getKey().toUpperCase();
+                                    contentEnchant += PriceLoreInjector.getEnchantmentPrices().getOrDefault(key, 0.0) * entry.getValue();
+                                }
+                            }
+
+                            shulkerValue[0] += (contentBase + contentEnchant) * content.getAmount();
+                        });
+
+                        itemTotal += shulkerValue[0];
+                    }
+                }
+
+
+                if (itemTotal > 0.0) {
+                    total += itemTotal;
                 } else {
                     unsoldItems.add(item.clone());
                 }
@@ -73,8 +110,9 @@ public class SellCommand implements CommandExecutor, Listener {
 
         if (total > 0.0) {
             PriceLoreInjector.getEconomy().depositPlayer(player, total);
-            player.sendMessage("§a+$" + PriceLoreInjector.formatPrice(total));
-            player.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent("§a+$" + PriceLoreInjector.formatPrice(total)));
+            String formatted = PriceLoreInjector.formatPrice(total);
+            player.sendMessage("§a+$" + formatted);
+            player.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent("§a+$" + formatted));
             player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.2f);
         } else {
             player.sendMessage("§cNo sellable items found.");
