@@ -67,7 +67,7 @@ public class SellCommand implements CommandExecutor, Listener {
 
                 double itemTotal = (basePrice + enchantPrice) * item.getAmount();
 
-                // 🟨 If it's a shulker, check inside and add their worth
+                //If it's a shulker, check inside and add their worth
                 if (item.getType().name().endsWith("SHULKER_BOX") && meta instanceof BlockStateMeta blockMeta) {
                     BlockState state = blockMeta.getBlockState();
                     if (state instanceof ShulkerBox shulker) {
