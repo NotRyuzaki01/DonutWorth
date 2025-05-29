@@ -19,6 +19,8 @@ import org.bukkit.event.player.*;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.*;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.block.ShulkerBox;
+
 
 import java.io.File;
 import java.util.*;
@@ -170,41 +172,61 @@ public class PriceLoreInjector extends JavaPlugin implements Listener {
         List<String> lore = meta.hasLore() ? meta.getLore() : new ArrayList<>();
         if (lore == null) lore = new ArrayList<>();
 
-        // Check if this is a button (custom name AND either no lore or lore without "Worth")
+        // Skip if this appears to be a GUI button
         boolean isButton = hasCustomName &&
                 (lore.isEmpty() ||
                         lore.stream().noneMatch(line -> ChatColor.stripColor(line).toLowerCase().contains("worth:")));
+        if (isButton) return item;
 
-        if (isButton) {
-            return item; // Don't inject price for buttons
-        }
+        double totalPrice = calculateTotalPrice(item);
 
-        double basePrice = materialPrices.getOrDefault(item.getType(), 0.0);
-        double enchantPrice = 0.0;
+        if (totalPrice <= 0.0) return item;
 
-        if (meta instanceof EnchantmentStorageMeta storageMeta) {
-            for (var entry : storageMeta.getStoredEnchants().entrySet()) {
-                String key = entry.getKey().getKey().getKey().toUpperCase();
-                enchantPrice += enchantmentPrices.getOrDefault(key, 0.0) * entry.getValue();
-            }
-        } else if (meta.hasEnchants()) {
-            for (var entry : meta.getEnchants().entrySet()) {
-                String key = entry.getKey().getKey().getKey().toUpperCase();
-                enchantPrice += enchantmentPrices.getOrDefault(key, 0.0) * entry.getValue();
-            }
-        }
-
-        double total = (basePrice + enchantPrice) * item.getAmount();
-        if (total <= 0.0) return item;
-
-        // Remove existing price lore if present
+        // Update lore
         lore.removeIf(line -> ChatColor.stripColor(line).toLowerCase().contains("worth:"));
-
-        // Add new price lore
-        lore.add("§7Worth: §a$" + formatPrice(total));
+        lore.add("§7Worth: §a$" + formatPrice(totalPrice));
         meta.setLore(lore);
         item.setItemMeta(meta);
         return item;
+    }
+
+    private double calculateTotalPrice(ItemStack item) {
+        double basePrice = materialPrices.getOrDefault(item.getType(), 0.0);
+        double enchantPrice = calculateEnchantmentPrice(item);
+        double shulkerContentsPrice = 0.0;
+
+        // Calculate shulker contents if applicable
+        if (item.getType().toString().endsWith("SHULKER_BOX") &&
+                item.getItemMeta() instanceof BlockStateMeta blockStateMeta) {
+            if (blockStateMeta.getBlockState() instanceof ShulkerBox shulkerBox) {
+                for (ItemStack content : shulkerBox.getInventory().getContents()) {
+                    if (content != null && content.getType() != Material.AIR) {
+                        shulkerContentsPrice += calculateTotalPrice(content);
+                    }
+                }
+            }
+        }
+
+        return (basePrice + enchantPrice + shulkerContentsPrice) * item.getAmount();
+    }
+
+    private double calculateEnchantmentPrice(ItemStack item) {
+        double enchantPrice = 0.0;
+        ItemMeta meta = item.getItemMeta();
+
+        if (meta instanceof EnchantmentStorageMeta storageMeta) {
+            for (Map.Entry<Enchantment, Integer> entry : storageMeta.getStoredEnchants().entrySet()) {
+                String key = entry.getKey().getKey().getKey().toUpperCase();
+                enchantPrice += enchantmentPrices.getOrDefault(key, 0.0) * entry.getValue();
+            }
+        } else if (meta != null && meta.hasEnchants()) {
+            for (Map.Entry<Enchantment, Integer> entry : meta.getEnchants().entrySet()) {
+                String key = entry.getKey().getKey().getKey().toUpperCase();
+                enchantPrice += enchantmentPrices.getOrDefault(key, 0.0) * entry.getValue();
+            }
+        }
+
+        return enchantPrice;
     }
 
     public static String formatPrice(double price) {
