@@ -57,6 +57,3 @@ No permissions required.
 Keeps inventories clean and stackable.
 Great for survival, SMP, and economy servers.
 Flexible for future expansion (e.g., sell shops, auction systems).
-
-## License
-This project is licensed under the MIT License.
